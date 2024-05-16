@@ -1,0 +1,1076 @@
+---
+title: "DS 740 Final Project Draft"
+author: "Charles Whorton"
+date: "12/1/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r results='hide', warning=FALSE, include = FALSE}
+#The below code format installs packages if they have not yet been installed then loads the packages.
+
+########## devtools ##########
+if (!require(devtools)){
+    install.packages('devtools')
+}
+library(devtools)
+
+########## SDMTools ##########
+  ##### If prompted to update packages press "1" then "Enter"
+if (!require(SDMTools)){
+  if (!require(remotes)){
+    install.packages('remotes')
+  }
+    remotes::install_version("SDMTools", "1.1-221")
+}
+library(SDMTools)
+
+########## stringi ##########
+if (!require(stringi)){
+    install.packages('stringi')
+}
+library(stringi)
+
+########## stringi ##########
+if (!require(stringr)){
+    install.packages('stringr')
+}
+library(stringr)
+
+########## Tidyverse ##########
+if (!require(tidyverse)){
+    install.packages('tidyverse')
+}
+library(tidyverse)
+
+########## GGPlot2 ##########
+if (!require(ggplot2)){
+    install.packages('ggplot2')
+}
+library(ggplot2)
+
+########## ggformula ##########
+if (!require(ggformula)){
+    install.packages('ggformula')
+}
+library(ggformula)
+
+########## StatsBombR ########## Package used for loading the data and some data cleansing functions
+if (!require(StatsBombR)){
+    devtools::install_github("statsbomb/StatsBombR")
+}
+library(StatsBombR)
+
+########## SBpitch ########## Package used to create a soccer pitch overlay on a visualization
+  ##### If prompted to update packages press "1" then "Enter"
+  ##### If asked "Do you want to install from sources the packages which need compilation" type "Yes"
+if (!require(SBpitch)){
+    devtools::install_github("FCrSTATS/SBpitch")
+}
+library(SBpitch)
+
+########## pROC ########## 
+if (!require(pROC)){
+    install.packages('pROC')
+}
+library(pROC)
+
+########## Hmisc ########## 
+if (!require(Hmisc)){
+    install.packages('Hmisc')
+}
+library(Hmisc)
+
+########## leaps ########## 
+if (!require(leaps)){
+    install.packages('leaps')
+}
+library(leaps)
+
+########## corrplot ########## 
+if (!require(corrplot)){
+    install.packages('corrplot')
+}
+library(corrplot)
+
+########## RColorBrewer ########## 
+if (!require(RColorBrewer)){
+    install.packages('RColorBrewer')
+}
+library(RColorBrewer)
+
+########## caret ########## 
+if (!require(caret)){
+    install.packages('caret')
+}
+library(caret)
+
+########## nnet ########## 
+if (!require(nnet)){
+    install.packages('nnet')
+}
+library(nnet)
+
+########## NeuralNetTools ########## 
+if (!require(NeuralNetTools)){
+    install.packages('NeuralNetTools')
+}
+library(NeuralNetTools)
+```
+
+
+
+```{r include=FALSE}
+# The first time running this chunk when there is not yet data in the environment there will be an error:
+#   "Error in stopifnot(inherits(handle, "curl_handle")) : INTEGER() can only be applied to a 'integer', not a 'unknown type #29'"
+#   The user can immediately run the chunk again after this error and the chunk will execute correclty. I believe it is a bug within one of StatsBombR's functions
+
+Comp = FreeCompetitions() %>%
+  filter(competition_id==11)
+# & season_name %in% c("2014/2015")
+
+Matches = FreeMatches(Comp)
+
+Barcelona_Data = StatsBombFreeEvents(MatchesDF = Matches, Parallel = F) # Parallel must = F for newer versions of R
+
+Barcelona_Data = allclean(Barcelona_Data) 
+# %>%
+#   filter(match_id %in% c(267499, 265835))
+```
+
+```{r}
+head(Barcelona_Data, n=20)
+
+test = FreeCompetitions() %>%
+  filter(competition_id == 11)
+
+length(unique(test$season_name))
+```
+
+## Intro to the Data
+We are working with data provided by StatsBomb, a soccer data analytics provider. StatsBomb has collected massive amounts of data across thousands of soccer matches. The data we are working with is called "event" data. Event data is every on-ball action that occurs in a soccer match. We have narrowed our focus to matches played by FC Barcelona from the 2004/2005 season to the 2020/2021 season. Since this data is very granular we will aggregate the data so we can view summary metrics across a whole match. The metrics will be passing, dribbling, and shooting metrics, among others.
+
+```{r}
+new_df = data.frame(NA)
+```
+
+
+### Team Passing statistics
+Here we are taking the attempted passes, completed passes, and the pass completion rate for Barcelona as well as the opposition. The pass completion rate and the number of attempted passes are both important here. Someone may say why is it important to know the total passes if you have the pass completion rate? In the game of soccer there may be two drastically different scenarios that both have similar pass completiong rates. The number of attempted passes can help differentiate these two scenarios. For example, one match mat show Barcelona having a very high number of attempted passes with a very high pass completion rate. This implies that they dominated possession of the ball. But what if the match was played to a tie? Barcelona may have struggled to break a very patient defense in this scenario. In another match they may have a lower number of attempted passes with a similarly high pass completion rate. In this scenario Barcelona may have played a team that also prefers possession of the ball so they decided to concede possession. In return Barcelona played the counter attack meaning shorter possessions when there are favorable attacking situations. This is why it is important to keep both attempted passes and pass completion rate.
+```{r}
+########## Barcelona Passes ##########
+attempted_passes_df = Barcelona_Data %>% 
+  filter(type.name == "Pass" & possession_team.name == "Barcelona") %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(attempted_passes = n)
+
+completed_passes_df = Barcelona_Data %>% 
+  filter(type.name == "Pass" & possession_team.name == "Barcelona" & is.na(pass.outcome.name)) %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(completed_passes = n)
+
+new_df = merge(attempted_passes_df, completed_passes_df, by=c("match_id"))
+
+rm(completed_passes_df)
+rm(attempted_passes_df)
+
+new_df = new_df %>%
+  mutate(pass_completion_rate = completed_passes / attempted_passes)
+
+########## Opponent Passes ##########
+opp_attempted_passes_df = Barcelona_Data %>% 
+  filter(type.name == "Pass" & possession_team.name != "Barcelona") %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(opp_attempted_passes = n)
+
+opp_completed_passes_df = Barcelona_Data %>% 
+  filter(type.name == "Pass" & possession_team.name != "Barcelona" & is.na(pass.outcome.name)) %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(opp_completed_passes = n)
+
+new_df = merge(new_df, opp_completed_passes_df, by=c("match_id"))
+new_df = merge(new_df, opp_attempted_passes_df, by=c("match_id"))
+
+rm(opp_completed_passes_df)
+rm(opp_attempted_passes_df)
+
+new_df = new_df %>%
+  mutate(opp_pass_completion_rate = opp_completed_passes / opp_attempted_passes)
+
+# new_df
+
+```
+
+
+### Team dribbling statistics
+<!-- Explain the purpose of this metric -->
+```{r}
+########## Barcelona Dribbles ##########
+completed_dribbles_df = Barcelona_Data %>% 
+  filter(type.name == "Dribble" & possession_team.name == "Barcelona" & dribble.outcome.name == "Complete") %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(completed_dribbles = n)
+
+attempted_dribbles_df = Barcelona_Data %>% 
+  filter(type.name == "Dribble" & possession_team.name == "Barcelona") %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(attempted_dribbles = n)
+
+new_df = merge(new_df, completed_dribbles_df, by=c("match_id"))
+new_df = merge(new_df, attempted_dribbles_df, by=c("match_id"))
+
+rm(completed_dribbles_df)
+rm(attempted_dribbles_df)
+
+new_df = new_df %>%
+  mutate(dribble_completion_rate = completed_dribbles / attempted_dribbles)
+
+########## Opponent Dribbles ##########
+opp_completed_dribbles_df = Barcelona_Data %>% 
+  filter(type.name == "Dribble" & possession_team.name != "Barcelona" & dribble.outcome.name == "Complete") %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(opp_completed_dribbles = n)
+
+opp_attempted_dribbles_df = Barcelona_Data %>% 
+  filter(type.name == "Dribble" & possession_team.name != "Barcelona") %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(opp_attempted_dribbles = n)
+
+new_df = merge(new_df, opp_completed_dribbles_df, by=c("match_id"))
+new_df = merge(new_df, opp_attempted_dribbles_df, by=c("match_id"))
+
+rm(opp_completed_dribbles_df)
+rm(opp_attempted_dribbles_df)
+
+new_df = new_df %>%
+  mutate(opp_dribble_completion_rate = opp_completed_dribbles / opp_attempted_dribbles)
+
+# new_df
+
+```
+
+
+### Through-balls
+<!-- Explain the purpose of this metric -->
+```{r}
+########## Barcelona Through Balls ##########
+completed_through_ball_df = Barcelona_Data %>% 
+  filter(pass.through_ball == "TRUE" & possession_team.name == "Barcelona" & is.na(pass.outcome.name)) %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(completed_through_balls = n)
+
+attempted_through_ball_df = Barcelona_Data %>% 
+  filter(pass.through_ball == "TRUE" & possession_team.name == "Barcelona") %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(attempted_through_balls = n)
+
+new_df = merge(new_df, completed_through_ball_df, by=c("match_id"), all.x = TRUE)
+new_df = merge(new_df, attempted_through_ball_df, by=c("match_id"), all.x = TRUE)
+
+rm(completed_through_ball_df)
+rm(attempted_through_ball_df)
+
+new_df = new_df %>%
+  mutate(through_ball_completion_rate = completed_through_balls / attempted_through_balls)
+
+########## Opponent Through Balls ##########
+opp_completed_through_ball_df = Barcelona_Data %>% 
+  filter(pass.through_ball == "TRUE" & possession_team.name != "Barcelona" & is.na(pass.outcome.name)) %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(opp_completed_through_balls = n)
+
+opp_attempted_through_ball_df = Barcelona_Data %>% 
+  filter(pass.through_ball == "TRUE" & possession_team.name != "Barcelona") %>%
+  group_by(match_id) %>% 
+  tally() %>%
+  rename(opp_attempted_through_balls = n)
+
+new_df = merge(new_df, opp_completed_through_ball_df, by=c("match_id"), all.x = TRUE)
+new_df = merge(new_df, opp_attempted_through_ball_df, by=c("match_id"), all.x = TRUE)
+
+rm(opp_completed_through_ball_df)
+rm(opp_attempted_through_ball_df)
+
+new_df = new_df %>%
+  mutate(opp_through_ball_completion_rate = opp_completed_through_balls / opp_attempted_through_balls)
+
+new_df[is.na(new_df)] = 0
+
+# new_df
+
+```
+
+
+### Average ball position
+<!-- Explain the purpose of this metric -->
+```{r}
+#### average ball position x ####
+avg_ball_position_df = Barcelona_Data %>% 
+  filter(possession_team.name == "Barcelona" &
+           (type.name == "Dribble" | 
+              type.name == "Pass" | 
+              type.name == "Ball Receipt*" | 
+              type.name == "Shot" | 
+              type.name == "Carry")) %>%
+  group_by(match_id) %>%
+  summarise(sum_location_x = sum(location.x))
+
+possession_totals_df = Barcelona_Data %>% 
+  filter(possession_team.name == "Barcelona" &
+           (type.name == "Dribble" | 
+              type.name == "Pass" | 
+              type.name == "Ball Receipt*" | 
+              type.name == "Shot" | 
+              type.name == "Carry")) %>%
+  group_by(match_id) %>%
+  tally()
+
+ball_position_x_df = merge(avg_ball_position_df, possession_totals_df, by=c("match_id"), all.x = TRUE)
+ball_position_x_df = ball_position_x_df %>%
+  mutate(avg_ball_position_x = sum_location_x / n)
+
+new_df = merge(new_df, ball_position_x_df, by=c("match_id"), all.x = TRUE)
+
+rm(avg_ball_position_df)
+rm(ball_position_x_df)
+
+#### Opponent average ball position x ####
+opp_avg_ball_position_df = Barcelona_Data %>% 
+  filter(possession_team.name != "Barcelona" &
+           (type.name == "Dribble" | 
+              type.name == "Pass" | 
+              type.name == "Ball Receipt*" | 
+              type.name == "Shot" | 
+              type.name == "Carry")) %>%
+  group_by(match_id) %>%
+  summarise(opp_sum_location_x = sum(location.x))
+
+opp_possession_totals_df = Barcelona_Data %>% 
+  filter(possession_team.name != "Barcelona" &
+           (type.name == "Dribble" | 
+              type.name == "Pass" | 
+              type.name == "Ball Receipt*" | 
+              type.name == "Shot" | 
+              type.name == "Carry")) %>%
+  group_by(match_id) %>%
+  tally()
+
+opp_ball_position_x_df = merge(opp_avg_ball_position_df, opp_possession_totals_df, by=c("match_id"), all.x = TRUE)
+opp_ball_position_x_df = opp_ball_position_x_df %>%
+  mutate(opp_avg_ball_position_x = opp_sum_location_x / n)
+
+new_df = merge(new_df, opp_ball_position_x_df, by=c("match_id"), all.x = TRUE)
+
+rm(opp_avg_ball_position_df)
+rm(opp_ball_position_x_df)
+rm(opp_possession_totals_df)
+rm(possession_totals_df)
+
+# new_df
+
+```
+
+
+### Shot location
+<!-- Explain the purpose of this metric -->
+```{r}
+########## Barca shots by distance ##########
+  #### Close shots ####
+attempted_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name == "Barcelona" & 
+           location.x >= 110) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(close_shots = n)
+
+made_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name == "Barcelona" & shot.outcome.name == "Goal" & 
+           location.x >= 110) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(close_shots_scored = n)
+
+shots_df = merge(attempted_shot_df, made_shot_df, by=c("match_id"), all.x = TRUE)
+shots_df[is.na(shots_df)] = 0
+
+shots_df = shots_df %>%
+  mutate(close_shot_conversion_rate = close_shots_scored / close_shots)
+
+  #### Midrange shots ####
+attempted_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name == "Barcelona" & 
+           location.x >= 98 & location.x < 110) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(midrange_shots = n)
+
+made_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name == "Barcelona" & shot.outcome.name == "Goal" & 
+           location.x >= 98 & location.x < 110) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(midrange_shots_scored = n)
+
+new_shots_df = merge(attempted_shot_df, made_shot_df, by=c("match_id"), all.x = TRUE)
+shots_df = merge(shots_df, new_shots_df, by=c("match_id"), all.x = TRUE)
+shots_df[is.na(shots_df)] = 0
+
+shots_df = shots_df %>%
+  mutate(midrange_shot_conversion_rate = midrange_shots_scored / midrange_shots)
+
+  #### Long shots ####
+attempted_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name == "Barcelona" & 
+           location.x < 98) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(long_shots = n)
+
+made_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name == "Barcelona" & shot.outcome.name == "Goal" &
+           location.x < 98) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(long_shots_scored = n)
+
+new_shots_df = merge(attempted_shot_df, made_shot_df, by=c("match_id"), all.x = TRUE)
+shots_df = merge(shots_df, new_shots_df, by=c("match_id"), all.x = TRUE)
+shots_df[is.na(shots_df)] = 0
+
+shots_df = shots_df %>%
+  mutate(long_shot_conversion_rate = long_shots_scored / long_shots)
+
+########## Opponent shots by distance ##########
+  #### Close shots ####
+opp_attempted_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name != "Barcelona" & 
+           location.x >= 110) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(opp_close_shots = n)
+
+opp_made_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name != "Barcelona" & shot.outcome.name == "Goal" & 
+           location.x >= 110) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(opp_close_shots_scored = n)
+
+new_shots_df = merge(opp_attempted_shot_df, opp_made_shot_df, by=c("match_id"), all.x = TRUE)
+shots_df = merge(shots_df, new_shots_df, by=c("match_id"), all.x = TRUE)
+shots_df[is.na(shots_df)] = 0
+
+shots_df = shots_df %>%
+  mutate(opp_close_shot_conversion_rate = opp_close_shots_scored / opp_close_shots)
+
+  #### Midrange shots ####
+opp_attempted_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name != "Barcelona" & 
+           location.x >= 98 & location.x < 110) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(opp_midrange_shots = n)
+
+opp_made_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name != "Barcelona" & shot.outcome.name == "Goal" & 
+           location.x >= 98 & location.x < 110) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(opp_midrange_shots_scored = n)
+
+new_shots_df = merge(opp_attempted_shot_df, opp_made_shot_df, by=c("match_id"), all.x = TRUE)
+shots_df = merge(shots_df, new_shots_df, by=c("match_id"), all.x = TRUE)
+shots_df[is.na(shots_df)] = 0
+
+shots_df = shots_df %>%
+  mutate(opp_midrange_shot_conversion_rate = opp_midrange_shots_scored / opp_midrange_shots)
+
+  #### Long shots ####
+opp_attempted_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name != "Barcelona" & 
+           location.x < 98) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(opp_long_shots = n)
+
+opp_made_shot_df = Barcelona_Data %>% 
+  filter(type.name == "Shot" & possession_team.name != "Barcelona" & shot.outcome.name == "Goal" &
+           location.x < 98) %>%
+  group_by(match_id) %>%
+  tally() %>%
+  rename(opp_long_shots_scored = n)
+
+new_shots_df = merge(opp_attempted_shot_df, opp_made_shot_df, by=c("match_id"), all.x = TRUE)
+shots_df = merge(shots_df, new_shots_df, by=c("match_id"), all.x = TRUE)
+shots_df[is.na(shots_df)] = 0
+
+shots_df = shots_df %>%
+  mutate(opp_long_shot_conversion_rate = opp_long_shots_scored / opp_long_shots)
+
+new_df = merge(new_df, shots_df, by=c("match_id"), all.x = TRUE)
+
+rm(shots_df)
+rm(new_shots_df)
+rm(attempted_shot_df)
+rm(opp_attempted_shot_df)
+rm(made_shot_df)
+rm(opp_made_shot_df)
+
+# new_df
+
+```
+
+
+<!-- Joining the cleansed datset with the Matches data -->
+```{r}
+
+# #Exporting the dataset so users do not need to run above code
+# write.csv(new_df,"Final_Project_Data.csv", row.names = FALSE, fileEncoding = "UTF-8")
+# Matches <- apply(Matches,2,as.character)
+# write.csv(Matches,"Final_Project_Matches.csv", row.names = FALSE)
+
+if (!exists("Barcelona_data")) {
+  new_df = read.csv("Final_Project_Data.csv")
+}
+
+if (!exists("Matches")) {
+  Matches = read.csv("Final_Project_Matches.csv")
+}
+  
+new_df[is.na(new_df)] = 0
+
+partial_matches = Matches %>%
+  select(c(match_id, match_date, home_team.home_team_name, home_score, away_team.away_team_name, away_score))
+
+new_df = merge(new_df, partial_matches, by=c("match_id"))
+
+
+if (exists("Barcelona_data")) {
+  rm(Barcelona_Data)
+}
+
+
+```
+
+### Final data transformations
+<!-- Explain final data transformations and the current state of the data -->
+
+For the final round of data preparation we perform a few final tasks. First, we create our response variable. We create the "win" variable as a categorical factor variable with the values Y for Yes and N for No. Win receives the value any time Barcelona win a match and it receives the value N for a draw or a loss. Additionally, select only the necessary variables for model fitting. For most all metrics there is a total attempts value, a successful attempts value, and a success rate value. As mentioned in a more specific scenario above we want the total attempts and the success rate metrics. 
+We also create a dataframe called transformed_df that contains log transformations of some skewed variables. We will see if this gives us better results.
+
+```{r}
+# log transform some variables to see if that improves accuracy. Looks like it doesn't
+
+new_df = new_df %>%
+  mutate(win = as.factor(case_when(
+    home_team.home_team_name == "Barcelona" & home_score > away_score ~ "Y",
+    away_team.away_team_name == "Barcelona" & away_score > home_score ~ "Y",
+    TRUE ~ "N")))
+
+transformed_df = new_df %>%
+  mutate( pass_completion_rate = log(pass_completion_rate),
+    attempted_through_balls = log(attempted_through_balls),
+    through_ball_completion_rate = log(through_ball_completion_rate),
+    opp_attempted_through_balls = log(opp_attempted_through_balls),
+    opp_through_ball_completion_rate = log(opp_through_ball_completion_rate))
+
+model_data = new_df %>%
+  select(c(win, attempted_passes, pass_completion_rate, opp_attempted_passes, opp_pass_completion_rate, 
+           attempted_dribbles, dribble_completion_rate, opp_attempted_dribbles, opp_dribble_completion_rate,
+           attempted_through_balls, through_ball_completion_rate, opp_attempted_through_balls, opp_through_ball_completion_rate,
+           avg_ball_position_x, opp_avg_ball_position_x, 
+           close_shots, midrange_shots, long_shots,
+           opp_close_shots, opp_midrange_shots, opp_long_shots))
+
+```
+
+
+
+### Looking for collinearity
+There is only one pair of variables that could be affected by collinearity and that is opp_attempted_passes and opp_pass_completion_rate. We suspect that there is correlation because teams that are good at paassing the ball (higher completion rate) will attempt more passes. The two variables do not cause the other but there are logical factors that probably see the two variables have correlation. For this reason we will not remove the variables as it is still important to see the scenarios where there are few attempted passes and a high completion rate.
+&nbsp;  
+
+We also notice that there is collinearity between attempted and completed metrics. This is part of the reason we omit the attempted metrics. Completion rate tells the same story and more.
+&nbsp;  
+
+There is an interesting  observation in this that is worth noting. There appears to be mild negative collinearity between opponent through ball attempts and opponent through ball completion rate. This means that the more through balls attempted the lower the completion rate. This implies that defensively FC Barcelona does not all many through balls between defenders.
+```{r}
+impute.mean <- function(x) replace(x, is.na(x) | is.nan(x) | is.infinite(x), mean(x[!is.na(x) & !is.nan(x) & !is.infinite(x)]))
+
+transformed_df1 = transformed_df %>%
+  select(c(1:10))
+
+transformed_df2 = transformed_df %>%
+  select(c(11:20))
+
+# Take only the numeric variables
+data_numeric1 = select_if(transformed_df1[, ], is.numeric)
+data_numeric2 = select_if(transformed_df2[, ], is.numeric)
+
+data_numeric1 <- apply(data_numeric1, 2, impute.mean)
+data_numeric2 <- apply(data_numeric2, 2, impute.mean)
+```
+
+<!-- Allows us to limit output that comes from the function -->
+```{r include=FALSE}
+sum(apply( data_numeric1, 2, function(.) sum(is.infinite(.)) ))
+sum(apply( data_numeric2, 2, function(.) sum(is.infinite(.)) ))
+```
+
+```{r}
+# Compute correlation matrix
+correlations1 <- cor(data_numeric1,
+	  use = "pairwise.complete.obs")
+
+correlations2 <- cor(data_numeric2,
+	  use = "pairwise.complete.obs")
+
+# Make the correlation plot
+corrplot(correlations1,
+	type = "upper", order = "hclust",
+	col = rev(brewer.pal(n = 8, name = "RdYlBu")),
+	method = "circle")
+
+corrplot(correlations2,
+	type = "upper", order = "hclust",
+	col = rev(brewer.pal(n = 8, name = "RdYlBu")),
+	method = "circle")
+
+```
+
+
+
+# Building Our Model  
+&nbsp;  
+
+## Logistic Regression
+#### Utlizing logistic regression to predict the probability of a Win or a Loss for FC Barcelona.
+&nbsp;  
+First we will identify the best models by finding the models that have the highest adjusted $R^2$ and BIC values. Then we will determine which of these is most accurate. We create a plot of the best model for each of the possible variable combinations and view them by adjusted $R^2$ and BIC.
+
+```{r}
+
+regfit = regsubsets(win ~ ., data = model_data, nvmax = 20)
+
+plot(regfit, scale = "bic")
+plot(regfit, scale = "adjr2")
+```
+
+&nbsp;  
+Next we view the coefficients of the best models.
+```{r}
+regfit_summary = summary(regfit)
+
+bic = which.min(regfit_summary$bic)
+arsq = which.max(regfit_summary$adjr2)
+
+coef(regfit, bic)
+coef(regfit, arsq)
+```
+
+
+### Cross Validating the BIC model  
+&nbsp;  
+
+When we loop through possible threshold values in an increment of .1 we can see all the possible accuracy values at different thresholds. At .63 we get the highest accuracy for both the BIC and Adjusted R-Squared Models. The BIC model just barely beats the Adjusted R-Squared Model .77842 to .7687861
+&nbsp;  
+
+```{r warning=FALSE}
+full_model = (win~.)
+
+bic_model = (win ~ opp_pass_completion_rate + through_ball_completion_rate + avg_ball_position_x + 
+   close_shots + midrange_shots + opp_close_shots + opp_midrange_shots)
+
+adjr2_model = (win ~ opp_pass_completion_rate + attempted_dribbles + dribble_completion_rate + opp_attempted_dribbles + opp_dribble_completion_rate +
+attempted_through_balls + through_ball_completion_rate + opp_attempted_through_balls +
+avg_ball_position_x + opp_avg_ball_position_x +
+close_shots + midrange_shots + long_shots  + opp_close_shots + opp_midrange_shots)
+```
+
+
+```{r}
+
+n = dim(model_data)[1]
+ngroups = 10 # using 10-fold cross-validation
+groups = rep(1:ngroups, length = n)
+
+set.seed(1)
+cvgroups = sample(groups, n)
+all_predicted = numeric(length = n)
+
+bic_model_threshold_accuracy = rep(NA, length = 99)
+
+for (jj in 1:99) {
+  for(ii in 1:ngroups){
+      groupii = (cvgroups == ii)
+      train_set = model_data[!groupii, ]
+      test_set = model_data[groupii, ]
+      
+      bic_CV_model_fit = glm(bic_model,
+        data = train_set, family = "binomial")
+      
+      predicted = predict(bic_CV_model_fit, newdata = test_set,
+                                    type="response")
+      bic_CV_predicted[groupii] = predicted
+    }
+  
+  mat = table(bic_CV_predicted > jj/100, model_data$win)
+  accuracy = sum(diag(mat)) / n
+  bic_model_threshold_accuracy[jj] = accuracy
+}
+
+bic_model_accuracy = max(bic_model_threshold_accuracy); bic_model_accuracy
+bic_model_threshold = which.max(bic_model_threshold_accuracy)/100; bic_model_threshold
+
+```
+
+
+
+### Plotting the most accurate threshold for the Cross Validated BIC model
+```{r}
+
+ggplot(mapping=aes(x=seq(.01, .99, 0.01), y=bic_model_threshold_accuracy)) + 
+  xlab("Threshold") +
+  ylab("Accuracy") +
+  geom_point() +
+  geom_vline(xintercept = which.max(bic_model_threshold_accuracy)/100, color = "red", size = .25) +
+  geom_hline(yintercept = max(bic_model_threshold_accuracy), color = "red", size = .25) +
+  labs(title = "Max Accuaracy Threshold for BIC Model", 
+       subtitle = paste0("Accuracy: ", round(max(bic_model_threshold_accuracy),4), "     Threshold: ", round(which.max(bic_model_threshold_accuracy)/100,4)))
+
+```
+
+
+
+&nbsp;  
+
+### Cross Validating the Adjustsed R-Squared model
+The Adjusted $R^2$ Model:
+```{r}
+
+n = dim(model_data)[1]
+ngroups = 10 # using 10-fold cross-validation
+groups = rep(1:ngroups, length = n)
+
+set.seed(1)
+cvgroups = sample(groups, n)
+all_predicted = numeric(length = n)
+
+adjr2_model_threshold_accuracy = rep(NA, length = 99)
+
+for (jj in 1:99) {
+  for(ii in 1:ngroups){
+      groupii = (cvgroups == ii)
+      train_set = model_data[!groupii, ]
+      test_set = model_data[groupii, ]
+      
+      adjr2_CV_model_fit = glm(adjr2_model,
+        data = train_set, family = "binomial")
+      
+      predicted = predict(adjr2_CV_model_fit, newdata = test_set,
+                                    type="response")
+      adjr2_CV_predicted[groupii] = predicted
+    }
+  
+  mat = table(adjr2_CV_predicted > jj/100, model_data$win)
+  accuracy = sum(diag(mat)) / n
+  adjr2_model_threshold_accuracy[jj] = accuracy
+}
+
+adjr2_model_accuracy = max(adjr2_model_threshold_accuracy); adjr2_model_accuracy
+adjr2_model_threshold = which.max(adjr2_model_threshold_accuracy)/100; adjr2_model_threshold
+  
+```
+
+
+&nbsp;  
+
+### Plotting the most accurate threshold for the Cross Validated Adjr2 model
+```{r}
+
+ggplot(mapping=aes(x=seq(.01, .99, 0.01), y=adjr2_model_threshold_accuracy)) + 
+  xlab("Threshold") +
+  ylab("Accuracy") +
+  geom_point() +
+  geom_vline(xintercept = which.max(adjr2_model_threshold_accuracy)/100, color = "red", size = .25) +
+  geom_hline(yintercept = max(adjr2_model_threshold_accuracy), color = "red", size = .25) +
+  labs(title = "Max Accuaracy Threshold for Adjusted R-Squared Model", 
+       subtitle = paste0("Accuracy: ", round(max(adjr2_model_threshold_accuracy),4), "     Threshold: ", round(which.max(adjr2_model_threshold_accuracy)/100,4)))
+  
+```
+
+&nbsp;  
+
+
+### ROC Curve
+The ROC Curve here shows us the tradoff between the true positive rate and the false positive rate. The two models are very comparable which we call tell further by the very close AUC for both curves.
+&nbsp;  
+
+```{r warning=FALSE, message=FALSE}
+bic_roc = roc(response = model_data$win, predictor = bic_CV_predicted)
+arsq_roc = roc(response = model_data$win, predictor = adjr2_CV_predicted)
+
+
+subtitle = paste0("BIC Model AUC: ", round(auc(bic_roc),3), "    Adjusted R-Squared Model AUC: ", round(auc(arsq_roc),3))
+
+ ggroc(list("BIC Model"=bic_roc, "Adjusted R-Squared"=arsq_roc)) +
+   labs(title = "ROC Curves for Logistic Regression models",
+       subtitle = subtitle)
+
+```
+
+
+&nbsp;  
+
+### Cross Validating the Neural Net models
+```{r}
+data_used = model_data
+ctrl = trainControl(method = "cv", number = 5)
+
+# cross-validation of full logistic model
+fit_caret_nn_full = train(win ~ .,
+                          data = data_used,
+                          method = "nnet",
+                          tuneGrid = expand.grid(size = 5, decay = 0),
+                          preProc = c("center", "scale"),
+                          maxit = 5000,
+                          trace = FALSE,
+                          trControl = ctrl)
+fit_caret_nn_full$results$Accuracy
+fit_caret_nn_full$finalModel
+
+# cross-validation of full logistic model
+fit_caret_nn_bic = train(bic_model,
+                         data = data_used,
+                         method = "nnet",
+                         tuneGrid = expand.grid(size = 3, decay = 0),
+                         preProc = c("center", "scale"),
+                         maxit = 5000,
+                         trace = FALSE,
+                         trControl = ctrl)
+fit_caret_nn_bic$results$Accuracy
+fit_caret_nn_bic$finalModel
+
+# cross-validation of full logistic model
+fit_caret_nn_adjr2 = train(adjr2_model,
+                           data = data_used,
+                           method = "nnet",
+                           tuneGrid = expand.grid(size = 4, decay = 0),
+                           preProc = c("center", "scale"),
+                           maxit = 5000,
+                           trace = FALSE,
+                           trControl = ctrl)
+fit_caret_nn_adjr2$results$Accuracy
+fit_caret_nn_adjr2$finalModel
+
+```
+
+
+### Double Cross Validation for model assessment
+```{r}
+
+
+###################################################################
+##### Double cross-validation for modeling-process assessment #####				 
+###################################################################
+
+##### model assessment OUTER shell #####
+# produce loops for 10-fold cross-validation for model ASSESSMENT
+nfolds = 10
+groups = rep(1:nfolds,length=n)  #produces list of group labels
+set.seed(1)
+training = trainControl(method = "cv", number = 10)
+ctrl = trainControl(method = "cv", number = 5)
+cvgroups = sample(groups,n)  #orders randomly
+
+# set up storage for predicted values from the double-cross-validation
+allpredictedCV = rep(NA,n)
+# set up storage to see what models are "best" on the inner loops
+allbestTypes = rep(NA,nfolds)
+# allbestPars = vector("list",nfolds)
+
+# loop through outer splits
+for (j in 1:nfolds)  {  #be careful not to re-use loop indices
+  groupj = (cvgroups == j)
+  traindata = model_data[!groupj,]
+  train_full_x = model.matrix(full_model, data = traindata)
+  train_bic_x = model.matrix(bic_model, data = traindata)
+  train_adjr2_x = model.matrix(adjr2_model, data = traindata)
+  trainy = traindata$win
+  validdata = model_data[groupj,]
+  valid_full_x = model.matrix(full_model, data = validdata)
+  valid_bic_x = model.matrix(bic_model, data = validdata)
+  valid_adjr2_x = model.matrix(adjr2_model, data = validdata)
+  validy = validdata$win
+  
+  #specify data to be used
+  dataused=traindata
+
+  ###  entire model-fitting process ###
+  # set up training method
+  set.seed(81)
+  training = trainControl(method = "cv", number = 10)
+  
+  # cross-validation of full logistic model
+  fit_caret_glm_full = train(win ~ .,
+                             data = dataused,
+                             method = "glm",
+                             trControl = training)
+  fit_caret_glm_full$finalModel
+  
+  # cross-validation of BIC logistic model
+  fit_caret_glm_bic = train(bic_model,
+                            data = dataused,
+                            method = "glm",
+                            trControl = training)
+  fit_caret_glm_bic$finalModel
+  
+  # cross-validation of full logistic model
+  fit_caret_glm_adjr2 = train(adjr2_model,
+                              data = dataused,
+                              method = "glm",
+                              trControl = training)
+  fit_caret_glm_adjr2$finalModel
+  
+  # cross-validation of full logistic model
+  fit_caret_nn_full = train(win ~ .,
+                            data = data_used,
+                            method = "nnet",
+                            tuneGrid = expand.grid(size = 5, decay = 0),
+                            preProc = c("center", "scale"),
+                            maxit = 5000,
+                            trace = FALSE,
+                            trControl = ctrl)
+  fit_caret_nn_full$finalModel
+  
+  # cross-validation of full logistic model
+  fit_caret_nn_bic = train(bic_model,
+                           data = data_used,
+                           method = "nnet",
+                           tuneGrid = expand.grid(size = 3, decay = 0),
+                           preProc = c("center", "scale"),
+                           maxit = 5000,
+                           trace = FALSE,
+                           trControl = ctrl)
+  fit_caret_nn_bic$finalModel
+  
+  # cross-validation of full logistic model
+  fit_caret_nn_adjr2 = train(adjr2_model,
+                             data = data_used,
+                             method = "nnet",
+                             tuneGrid = expand.grid(size = 4, decay = 0),
+                             preProc = c("center", "scale"),
+                             maxit = 5000,
+                             trace = FALSE,
+                             trControl = ctrl)
+  fit_caret_nn_adjr2$finalModel
+  
+  ############# identify selected model to fit to full data #############
+  # all best models
+  all_best_Types = c("Logistic", "Logistic", "Logistic", "NN"," NN", "NN")
+  model_names = c("Logistic Full", "Logistic BIC", "Logistic Adjr2", "NN Full"," NN BIC", "NN Adjr2")
+  all_best_Models = list(fit_caret_glm_full$finalModel,
+                         fit_caret_glm_bic$finalModel,
+                         fit_caret_glm_adjr2$finalModel,
+                         fit_caret_nn_full$finalModel,
+                         fit_caret_nn_bic$finalModel,
+                         fit_caret_nn_adjr2$finalModel)
+  all_best_accuracy = c(fit_caret_glm_full$results$Accuracy,
+                    fit_caret_glm_bic$results$Accuracy,
+                    fit_caret_glm_adjr2$results$Accuracy,
+                    fit_caret_nn_full$results$Accuracy,
+                    fit_caret_nn_bic$results$Accuracy,
+                    fit_caret_nn_adjr2$results$Accuracy)
+  
+  one_best_Type = all_best_Types[which.max(all_best_accuracy)]
+  one_best_name = model_names[which.max(all_best_accuracy)]
+  # one_best_Pars = all_best_Pars[which.max(all_best_accuracy)]
+  one_best_Model = all_best_Models[[which.max(all_best_accuracy)]]
+  ###  :	:	:	:	:	:	:   ###
+  ###  resulting in     ###
+  ###  one_best_Type and one_best_Pars and one_best_Model ###
+  
+  allbestTypes[j] = one_best_Type
+  
+  if (one_best_name == "Logistic Full") {  # then best is one of logistic models
+    allpredictedCV[groupj] = predict(one_best_Model, validdata, type = "response")
+  } else if (one_best_Type == "Logistic BIC") {  # then best is one of Neural Net models
+    allpredictedCV[groupj]  = predict(one_best_Model, validdata,type="prob")
+  } else if (one_best_Type == "Logistic Adjr2") {  # then best is one of Neural Net models
+    allpredictedCV[groupj]  = predict(one_best_Model, validdata,type="prob")
+  } else if (one_best_Type == "NN Full") {  # then best is one of Neural Net models
+    allpredictedCV[groupj]  = predict(one_best_Model, validdata,type="prob")
+  }else if (one_best_Type == "NN BIC") {  # then best is one of Neural Net models
+    allpredictedCV[groupj]  = predict(one_best_Model, validdata,type="prob")
+  }else if (one_best_Type == "NN Adjr2") {  # then best is one of Neural Net models
+    allpredictedCV[groupj]  = predict(one_best_Model, validdata,type="prob")
+  }
+}
+
+# for curiosity / consistency, we can see the models that were "best" on each of the inner splits
+allbestTypes
+
+#Best Model
+one_best_name
+one_best_Model
+
+```
+
+
+### Garson plot for variable importance
+```{r}
+garson(fit_caret_nn_bic) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+```{r}
+model_names = c("Logistic BIC CV", "Logistic Adjr2 CV", "Best CV Model Caret")
+final_accuracy = max(c(bic_model_accuracy, adjr2_model_accuracy, max(all_best_accuracy)))
+
+model_names[which.max(final_accuracy)]
+max(final_accuracy)
+```
+
+
+## Fitting to the final dataset
+```{r}
+final_fit = predict(bic_CV_model_fit, model_data, type = "response")
+final_mat = table(final_fit > bic_model_threshold, model_data$win)
+final_accuracy = sum(diag(final_mat)) / n
+cat("Final Model Accuracy fitted on the entire dataset:", paste0(round(final_accuracy*100,2),"%\n"))
+
+final_fit = predict(adjr2_CV_model_fit, model_data, type = "response")
+final_mat = table(final_fit > adjr2_model_accuracy, model_data$win)
+final_accuracy = sum(diag(final_mat)) / n
+cat("Adjr2 CV Model Accuracy fitted on the entire dataset:", paste0(round(final_accuracy*100,2),"%\n"))
+
+final_fit = predict(one_best_Model, model_data, type = "response")
+final_mat = table(final_fit > bic_model_threshold, model_data$win)
+final_accuracy = sum(diag(final_mat)) / n
+cat("Double CV Caret Model Accuracy fitted on the entire dataset:", paste0(round(final_accuracy*100,2),"%\n"))
+
+
+```
+
+
+
+
+
+
